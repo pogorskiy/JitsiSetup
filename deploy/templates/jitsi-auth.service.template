@@ -1,0 +1,15 @@
+[Unit]
+Description=Jitsi Auth Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/jitsi-auth
+Environment="PATH=/opt/jitsi-auth/venv/bin"
+ExecStart=/opt/jitsi-auth/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
