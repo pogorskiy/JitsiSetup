@@ -451,11 +451,14 @@ setup_ssl() {
     log_info "Stopping nginx for certificate acquisition..."
     systemctl stop nginx
 
-    # Remove temporary self-signed certificates
-    rm -f "/etc/letsencrypt/live/${MAIN_DOMAIN}/fullchain.pem"
-    rm -f "/etc/letsencrypt/live/${MAIN_DOMAIN}/privkey.pem"
-    rm -f "/etc/letsencrypt/live/${AUTH_DOMAIN}/fullchain.pem"
-    rm -f "/etc/letsencrypt/live/${AUTH_DOMAIN}/privkey.pem"
+    # Remove temporary self-signed certificates AND their directories
+    # This prevents certbot from creating -0001 suffixed directories
+    rm -rf "/etc/letsencrypt/live/${MAIN_DOMAIN}"
+    rm -rf "/etc/letsencrypt/live/${AUTH_DOMAIN}"
+    rm -rf "/etc/letsencrypt/archive/${MAIN_DOMAIN}"
+    rm -rf "/etc/letsencrypt/archive/${AUTH_DOMAIN}"
+    rm -f "/etc/letsencrypt/renewal/${MAIN_DOMAIN}.conf"
+    rm -f "/etc/letsencrypt/renewal/${AUTH_DOMAIN}.conf"
 
     # Obtain SSL certificate for main domain using standalone mode
     log_info "Obtaining SSL certificate for ${MAIN_DOMAIN}..."
