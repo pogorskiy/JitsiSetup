@@ -466,12 +466,9 @@ start_nginx() {
     systemctl start nginx
     systemctl enable nginx
 
-    # Enable certbot timer for auto-renewal
+    # Enable certbot timer for auto-renewal (uses nginx plugin automatically)
     systemctl enable certbot.timer 2>/dev/null || true
     systemctl start certbot.timer 2>/dev/null || true
-
-    # Test renewal
-    certbot renew --dry-run
 
     log_info "nginx started successfully"
 }
