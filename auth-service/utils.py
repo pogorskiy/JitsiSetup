@@ -183,21 +183,26 @@ def make_jitsi_jwt(email: str, name: str, room: str) -> str:
     
     now = int(time.time())
     
+    # Room name should be lowercase for Jitsi
+    room_lower = room.lower()
+    
     payload = {
         "aud": app_id,
         "iss": app_id,
-        "sub": domain,
-        "room": room,
+        "sub": "*",  # Wildcard subject for all rooms
+        "room": "*",  # Wildcard room - allows access to any room
         "context": {
             "user": {
+                "id": email,  # Unique user identifier
                 "name": name,
                 "email": email,
-                "moderator": True
+                "moderator": True,
+                "affiliation": "owner"  # Grant owner privileges
             }
         },
         "iat": now,
-        "nbf": now - 5,  # Allow 5 seconds clock skew
-        "exp": now + 3600  # Token valid for 1 hour
+        "nbf": now - 10,  # Allow 10 seconds clock skew
+        "exp": now + 7200  # Token valid for 2 hours
     }
     
     return jwt.encode(payload, app_secret, algorithm="HS256")

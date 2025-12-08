@@ -267,16 +267,54 @@ setup_jitsi() {
     # Create required directories
     mkdir -p ~/.jitsi-meet-cfg/{web,transcripts,prosody/config,prosody/prosody-plugins-custom,jicofo,jvb,jigasi,jibri}
 
-    # Generate .env from template
-    log_info "Generating Jitsi .env file..."
-    substitute_template "${SCRIPT_DIR}/deploy/templates/jitsi.env.template" "${JITSI_DIR}/.env"
-
+    # Copy example .env and generate passwords FIRST
+    log_info "Copying example .env and generating passwords..."
+    if [[ -f "./env.example" ]]; then
+        cp ./env.example ./.env
+    fi
+    
     # Run gen-passwords.sh to generate secure passwords
     log_info "Generating Jitsi passwords..."
     if [[ -f "./gen-passwords.sh" ]]; then
         chmod +x ./gen-passwords.sh
         ./gen-passwords.sh
     fi
+
+    # Append our custom settings to .env (don't overwrite passwords!)
+    log_info "Appending custom Jitsi settings..."
+    cat >> "${JITSI_DIR}/.env" << EOF
+
+# ============================================
+# Custom settings added by deploy script
+# ============================================
+
+# Timezone
+TZ=${TIMEZONE}
+
+# Disable internal HTTPS (nginx handles SSL)
+DISABLE_HTTPS=1
+ENABLE_LETSENCRYPT=0
+
+# HTTP ports (internal, behind nginx)
+HTTP_PORT=8000
+HTTPS_PORT=8443
+
+# Public URL
+PUBLIC_URL=https://${MAIN_DOMAIN}
+
+# JWT Authentication
+ENABLE_AUTH=1
+AUTH_TYPE=jwt
+ENABLE_GUESTS=1
+JWT_APP_ID=${APP_ID}
+JWT_APP_SECRET=${APP_SECRET}
+
+# Token Auth URL - redirects to Auth Service
+TOKEN_AUTH_URL=https://${AUTH_DOMAIN}/auth/{room}
+
+# Config directory
+CONFIG=~/.jitsi-meet-cfg
+EOF
 
     # Start Jitsi containers
     log_info "Starting Jitsi containers..."
@@ -409,18 +447,40 @@ EOF
 setup_ssl() {
     log_info "Setting up SSL certificates..."
 
-    # Obtain SSL certificate for main domain
+    # Stop nginx to free port 80 for standalone mode
+    log_info "Stopping nginx for certificate acquisition..."
+    systemctl stop nginx
+
+    # Remove temporary self-signed certificates
+    rm -f "/etc/letsencrypt/live/${MAIN_DOMAIN}/fullchain.pem"
+    rm -f "/etc/letsencrypt/live/${MAIN_DOMAIN}/privkey.pem"
+    rm -f "/etc/letsencrypt/live/${AUTH_DOMAIN}/fullchain.pem"
+    rm -f "/etc/letsencrypt/live/${AUTH_DOMAIN}/privkey.pem"
+
+    # Obtain SSL certificate for main domain using standalone mode
     log_info "Obtaining SSL certificate for ${MAIN_DOMAIN}..."
-    certbot --nginx -d "${MAIN_DOMAIN}" --non-interactive --agree-tos --email "admin@${MAIN_DOMAIN}" --redirect
+    certbot certonly --standalone -d "${MAIN_DOMAIN}" --non-interactive --agree-tos --email "admin@${MAIN_DOMAIN}"
 
-    # Obtain SSL certificate for auth domain
+    # Obtain SSL certificate for auth domain using standalone mode
     log_info "Obtaining SSL certificate for ${AUTH_DOMAIN}..."
-    certbot --nginx -d "${AUTH_DOMAIN}" --non-interactive --agree-tos --email "admin@${MAIN_DOMAIN}" --redirect
+    certbot certonly --standalone -d "${AUTH_DOMAIN}" --non-interactive --agree-tos --email "admin@${MAIN_DOMAIN}"
 
-    # Set up automatic renewal (certbot installs a systemd timer by default)
-    log_info "Verifying certbot auto-renewal..."
+    # Start nginx with real certificates
+    log_info "Starting nginx with Let's Encrypt certificates..."
+    systemctl start nginx
+
+    # Set up automatic renewal with nginx reload hook
+    log_info "Configuring certbot auto-renewal..."
     systemctl enable certbot.timer
     systemctl start certbot.timer
+
+    # Create renewal hook to reload nginx after certificate renewal
+    mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+    cat > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh << 'EOF'
+#!/bin/bash
+systemctl reload nginx
+EOF
+    chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
 
     # Test renewal
     certbot renew --dry-run
