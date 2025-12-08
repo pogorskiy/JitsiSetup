@@ -391,27 +391,6 @@ setup_nginx() {
     ln -sf /etc/nginx/sites-available/jitsi /etc/nginx/sites-enabled/jitsi
     ln -sf /etc/nginx/sites-available/auth /etc/nginx/sites-enabled/auth
 
-    # Test nginx configuration (will fail until SSL certs are obtained)
-    # We'll create temporary self-signed certs first
-    log_info "Creating temporary SSL certificates for nginx test..."
-    mkdir -p "/etc/letsencrypt/live/${MAIN_DOMAIN}"
-    mkdir -p "/etc/letsencrypt/live/${AUTH_DOMAIN}"
-
-    # Create temporary self-signed certs if Let's Encrypt certs don't exist
-    if [[ ! -f "/etc/letsencrypt/live/${MAIN_DOMAIN}/fullchain.pem" ]]; then
-        openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
-            -keyout "/etc/letsencrypt/live/${MAIN_DOMAIN}/privkey.pem" \
-            -out "/etc/letsencrypt/live/${MAIN_DOMAIN}/fullchain.pem" \
-            -subj "/CN=${MAIN_DOMAIN}"
-    fi
-
-    if [[ ! -f "/etc/letsencrypt/live/${AUTH_DOMAIN}/fullchain.pem" ]]; then
-        openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
-            -keyout "/etc/letsencrypt/live/${AUTH_DOMAIN}/privkey.pem" \
-            -out "/etc/letsencrypt/live/${AUTH_DOMAIN}/fullchain.pem" \
-            -subj "/CN=${AUTH_DOMAIN}"
-    fi
-
     # Create SSL options file if not exists
     if [[ ! -f "/etc/letsencrypt/options-ssl-nginx.conf" ]]; then
         cat > /etc/letsencrypt/options-ssl-nginx.conf << 'EOF'
@@ -429,14 +408,7 @@ EOF
         openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048
     fi
 
-    # Test nginx configuration
-    log_info "Testing nginx configuration..."
-    nginx -t
-
-    # Reload nginx
-    systemctl reload nginx
-
-    log_info "nginx setup complete"
+    log_info "nginx config prepared (will start after SSL certificates are obtained)"
 }
 
 
@@ -447,12 +419,10 @@ EOF
 setup_ssl() {
     log_info "Setting up SSL certificates..."
 
-    # Stop nginx to free port 80 for standalone mode
-    log_info "Stopping nginx for certificate acquisition..."
-    systemctl stop nginx
+    # Stop nginx if running to free port 80 for standalone mode
+    systemctl stop nginx 2>/dev/null || true
 
-    # Remove temporary self-signed certificates AND their directories
-    # This prevents certbot from creating -0001 suffixed directories
+    # Clean up any existing certificates for these domains
     rm -rf "/etc/letsencrypt/live/${MAIN_DOMAIN}"
     rm -rf "/etc/letsencrypt/live/${AUTH_DOMAIN}"
     rm -rf "/etc/letsencrypt/archive/${MAIN_DOMAIN}"
@@ -468,16 +438,8 @@ setup_ssl() {
     log_info "Obtaining SSL certificate for ${AUTH_DOMAIN}..."
     certbot certonly --standalone -d "${AUTH_DOMAIN}" --non-interactive --agree-tos --email "admin@${MAIN_DOMAIN}"
 
-    # Start nginx with real certificates
-    log_info "Starting nginx with Let's Encrypt certificates..."
-    systemctl start nginx
-
     # Set up automatic renewal with nginx reload hook
     log_info "Configuring certbot auto-renewal..."
-    systemctl enable certbot.timer
-    systemctl start certbot.timer
-
-    # Create renewal hook to reload nginx after certificate renewal
     mkdir -p /etc/letsencrypt/renewal-hooks/deploy
     cat > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh << 'EOF'
 #!/bin/bash
@@ -485,10 +447,33 @@ systemctl reload nginx
 EOF
     chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
 
+    log_info "SSL certificates obtained successfully"
+}
+
+
+# ============================================================================
+# 8.11 Start Nginx Function
+# ============================================================================
+
+start_nginx() {
+    log_info "Starting nginx..."
+
+    # Test nginx configuration
+    log_info "Testing nginx configuration..."
+    nginx -t
+
+    # Start nginx
+    systemctl start nginx
+    systemctl enable nginx
+
+    # Enable certbot timer for auto-renewal
+    systemctl enable certbot.timer 2>/dev/null || true
+    systemctl start certbot.timer 2>/dev/null || true
+
     # Test renewal
     certbot renew --dry-run
 
-    log_info "SSL setup complete"
+    log_info "nginx started successfully"
 }
 
 
@@ -524,24 +509,28 @@ main() {
 
     # Execute deployment steps
     log_info ""
-    log_info "Step 1/5: Installing dependencies..."
+    log_info "Step 1/6: Installing dependencies..."
     install_dependencies
 
     log_info ""
-    log_info "Step 2/5: Setting up Jitsi Meet..."
+    log_info "Step 2/6: Setting up Jitsi Meet..."
     setup_jitsi
 
     log_info ""
-    log_info "Step 3/5: Setting up Auth Service..."
+    log_info "Step 3/6: Setting up Auth Service..."
     setup_auth_service
 
     log_info ""
-    log_info "Step 4/5: Setting up nginx..."
+    log_info "Step 4/6: Preparing nginx configuration..."
     setup_nginx
 
     log_info ""
-    log_info "Step 5/5: Setting up SSL certificates..."
+    log_info "Step 5/6: Obtaining SSL certificates..."
     setup_ssl
+
+    log_info ""
+    log_info "Step 6/6: Starting nginx..."
+    start_nginx
 
     # Final status
     log_info ""
