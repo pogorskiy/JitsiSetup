@@ -3,6 +3,7 @@
 Uses hypothesis library for property-based testing.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -11,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from hypothesis import given, strategies as st, settings, assume
 
-from utils import parse_allowed_domains, is_domain_allowed
+from utils import parse_allowed_domains, is_domain_allowed, sign_state, verify_state
 
 
 # Strategy for generating valid domain-like strings (non-empty, no commas)
@@ -188,3 +189,39 @@ def test_domain_matching_rejects_non_matching(
     assert not is_domain_allowed(
         email, allowed_domains
     ), f"Email domain '{email_domain}' should NOT match allowed '{allowed_domain}'"
+
+
+
+# Strategy for generating valid room names (non-empty strings without colons at the end)
+room_name_chars = st.sampled_from(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+)
+room_name_strategy = st.text(alphabet=room_name_chars, min_size=1, max_size=100)
+
+
+@given(room=room_name_strategy)
+@settings(max_examples=100)
+def test_state_signing_roundtrip(room: str):
+    """
+    **Feature: jitsi-google-auth-deploy, Property 3: State Signing Round-Trip**
+    **Validates: Requirements 5.1, 5.2**
+
+    For any room name, signing the state and then verifying it SHALL return
+    the original room name.
+    """
+    # Set up a test STATE_SECRET for the test
+    os.environ["STATE_SECRET"] = "test-secret-key-for-property-testing"
+    
+    try:
+        # Sign the state
+        signed_state = sign_state(room)
+        
+        # Verify the state and get back the room name
+        recovered_room = verify_state(signed_state)
+        
+        # The recovered room should match the original
+        assert recovered_room == room, f"Expected room '{room}', got '{recovered_room}'"
+    finally:
+        # Clean up environment variable
+        if "STATE_SECRET" in os.environ:
+            del os.environ["STATE_SECRET"]

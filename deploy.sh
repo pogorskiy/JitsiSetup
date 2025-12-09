@@ -316,6 +316,20 @@ TOKEN_AUTH_URL=https://${AUTH_DOMAIN}/auth/{room}
 CONFIG=~/.jitsi-meet-cfg
 EOF
 
+    # Ensure containers restart on reboot by adding restart policy to docker-compose override
+    log_info "Configuring container restart policy..."
+    cat > "${JITSI_DIR}/docker-compose.override.yml" << 'EOF'
+services:
+  web:
+    restart: unless-stopped
+  prosody:
+    restart: unless-stopped
+  jicofo:
+    restart: unless-stopped
+  jvb:
+    restart: unless-stopped
+EOF
+
     # Start Jitsi containers
     log_info "Starting Jitsi containers..."
     docker compose up -d
